@@ -7,10 +7,7 @@ from matplotlib.path import Path
 
 
 class DataManager(QObject):
-    """
-    Se encarga exclusivamente de la manipulación de datos y archivos.
-    No sabe nada de la interfaz gráfica.
-    """
+    """Manages dataset state, CSV persistence, and file moves. Emits data_changed after any modification."""
 
     data_changed = Signal()
 
@@ -27,14 +24,14 @@ class DataManager(QObject):
                 df['estado'] = 'activo'
             return df
         except FileNotFoundError:
-            print(f"Error: No se encontró {self.csv_path}")
+            print(f"Error: file not found — {self.csv_path}")
             return pd.DataFrame()
 
     def _guardar_csv(self):
         try:
             self.df.to_csv(self.csv_path, index=False)
         except Exception as e:
-            print(f"Error guardando CSV: {e}")
+            print(f"Error saving CSV: {e}")
 
     def get_puntos_umap(self):
         if self.df.empty: return [], [], [], []
@@ -75,7 +72,7 @@ class DataManager(QObject):
                 self.df.at[idx, 'estado'] = 'borrado'
                 movidos += 1
             except Exception as e:
-                print(f"Error moviendo {ruta_origen}: {e}")
+                print(f"Error moving {ruta_origen}: {e}")
                 errores += 1
         if movidos > 0:
             self._guardar_csv()
@@ -139,7 +136,7 @@ class DataManager(QObject):
                 self.df.at[idx, 'estado'] = 'activo'
                 restaurados += 1
             except Exception as e:
-                print(f"Error restaurando {ruta_original}: {e}")
+                print(f"Error restoring {ruta_original}: {e}")
                 errores += 1
         self._guardar_csv()
         self.data_changed.emit()

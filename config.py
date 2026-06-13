@@ -1,10 +1,10 @@
-# Rutas de datos
-ARCHIVO_DATOS = "output/datos_clusters_vitb14.csv"
-CARPETA_DESCARTES = "data/deleted"
-NOMBRE_MODELO_EMBEDDING = "DINOv2 ViT-B/14"
+# Data paths
+DATA_FILE = "output/datos_clusters_vitb14.csv"
+TRASH_FOLDER = "data/deleted"
+EMBEDDING_MODEL_NAME = "DINOv2 ViT-B/14"
 
-# Estilos CSS (tema oscuro / tema claro)
-ESTILO_OSCURO = """
+# CSS styles (dark theme / light theme)
+DARK_THEME = """
     QMainWindow, QWidget { background-color: #2d2d2d; color: #e0e0e0; }
     QLabel { color: #e0e0e0; font-weight: bold; }
     QListWidget { background-color: #1e1e1e; color: #e0e0e0; border: 1px solid #444; }
@@ -42,7 +42,7 @@ ESTILO_OSCURO = """
     }
 """
 
-ESTILO_CLARO = """
+LIGHT_THEME = """
     QMainWindow, QWidget { background-color: #f0f0f0; color: black; }
     QLabel { color: black; font-weight: bold; }
     QListWidget { background-color: white; color: black; border: 1px solid #ccc; }
@@ -72,8 +72,8 @@ ESTILO_CLARO = """
     }
 """
 
-# Agrupado para acceso por nombre de tema (usado en main_window)
-ESTILOS = {
-    "oscuro": ESTILO_OSCURO,
-    "claro": ESTILO_CLARO,
+# Grouped for access by theme name (used in main_window)
+THEMES = {
+    "dark": DARK_THEME,
+    "light": LIGHT_THEME,
 }

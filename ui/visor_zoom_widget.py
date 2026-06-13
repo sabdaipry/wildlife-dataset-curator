@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt, QRectF
 
 
 class VisorZoomWidget(QGraphicsView):
-    """Tu visor de imágenes original, encapsulado."""
+    """Image viewer widget with pan and zoom support."""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.scene = QGraphicsScene(self)

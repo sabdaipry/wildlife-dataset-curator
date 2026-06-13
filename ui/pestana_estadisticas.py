@@ -7,13 +7,14 @@ from PySide6.QtCore import Qt
 
 
 class StatisticsPanel(QWidget):
+    """Widget displaying per-family and per-species image counts, with export-to-Excel and full-reset controls."""
+
     def __init__(self, manager, parent=None):
         super().__init__(parent)
         self.manager = manager
 
         layout = QVBoxLayout(self)
 
-        # --- 1. CABECERA: Resumen y Botón Exportar ---
         header_layout = QHBoxLayout()
 
         self.lbl_resumen = QLabel("-")
@@ -25,12 +26,12 @@ class StatisticsPanel(QWidget):
         self.btn_export = QPushButton("💾 Exportar Tablas")
         self.btn_export.setCursor(Qt.PointingHandCursor)
         self.btn_export.setStyleSheet("background-color: #92c43e; border-radius: 5px; color: white; font-weight: bold; padding: 8px;")
-        self.btn_export.clicked.connect(self.exportar_excel)
+        self.btn_export.clicked.connect(self.export_excel)
 
         self.btn_reset = QPushButton("🔄 Restaurar Dataset")
         self.btn_reset.setCursor(Qt.PointingHandCursor)
         self.btn_reset.setStyleSheet("background-color: #59802a; border-radius: 5px; color: white; font-weight: bold; padding: 8px;")
-        self.btn_reset.clicked.connect(self.resetear_dataset)
+        self.btn_reset.clicked.connect(self.reset_dataset)
 
         layout_btns_right.addWidget(self.btn_export)
         layout_btns_right.addWidget(self.btn_reset)
@@ -38,23 +39,21 @@ class StatisticsPanel(QWidget):
         header_layout.addLayout(layout_btns_right)
         layout.addLayout(header_layout)
 
-        # --- 2. TABLA FAMILIAS ---
         layout.addWidget(QLabel("📊 Balance por Familias"))
         self.tabla_familias = QTableWidget()
         self.configurar_tabla(self.tabla_familias, ["Familia", "Originales", "Eliminadas", "Actuales"])
         layout.addWidget(self.tabla_familias, stretch=1)
 
-        # --- 3. TABLA ESPECIES ---
         layout.addWidget(QLabel("🐾 Balance por Especies"))
         self.tabla_especies = QTableWidget()
         cols_especies = ["Nombre Científico", "Nombre Común", "Familia", "Género", "Originales", "Eliminadas", "Actuales"]
         self.configurar_tabla(self.tabla_especies, cols_especies)
         layout.addWidget(self.tabla_especies, stretch=2)
 
-        self.manager.data_changed.connect(self.refrescar_todo)
-        self.refrescar_todo()
+        self.manager.data_changed.connect(self.refresh_all)
+        self.refresh_all()
 
-    def resetear_dataset(self):
+    def reset_dataset(self):
         confirmacion = QMessageBox.warning(
             self, "PELIGRO: Restaurar Dataset",
             "¿Estás segura de que quieres RESTAURAR TODO el dataset?\n\n"
@@ -81,12 +80,12 @@ class StatisticsPanel(QWidget):
         tabla.setSortingEnabled(True)
         tabla.setAlternatingRowColors(True)
 
-    def refrescar_todo(self):
-        self.actualizar_resumen()
-        self.actualizar_tabla_familias()
-        self.actualizar_tabla_especies()
+    def refresh_all(self):
+        self.update_summary()
+        self.update_families_table()
+        self.update_species_table()
 
-    def actualizar_resumen(self):
+    def update_summary(self):
         kpis = self.manager.get_resumen_global()
         if not kpis:
             return
@@ -96,7 +95,7 @@ class StatisticsPanel(QWidget):
                f"<b>Familias:</b> {kpis['n_familias']}")
         self.lbl_resumen.setText(txt)
 
-    def actualizar_tabla_familias(self):
+    def update_families_table(self):
         df = self.manager.get_estadisticas_familias()
         t = self.tabla_familias
         t.setSortingEnabled(False)
@@ -113,13 +112,13 @@ class StatisticsPanel(QWidget):
                 t.setItem(row, col, item)
         t.setSortingEnabled(True)
 
-    def actualizar_tabla_especies(self):
+    def update_species_table(self):
         df = self.manager.get_estadisticas_detalladas()
         t = self.tabla_especies
         t.setSortingEnabled(False)
         t.setRowCount(len(df))
-        COLOR_ROJO = QColor("#ffcccc")
-        COLOR_AMARILLO = QColor("#ffffcc")
+        COLOR_RED = QColor("#ffcccc")
+        COLOR_YELLOW = QColor("#ffffcc")
         for row, (n_cientifico, registro) in enumerate(df.iterrows()):
             n_comun = str(registro['nombre_comun'])
             familia = str(registro['familia'])
@@ -139,9 +138,9 @@ class StatisticsPanel(QWidget):
             items[6].setData(Qt.DisplayRole, activo)
             bg = None
             if activo == 0:
-                bg = COLOR_ROJO
+                bg = COLOR_RED
             elif activo < 10:
-                bg = COLOR_AMARILLO
+                bg = COLOR_YELLOW
             for col, item in enumerate(items):
                 if bg:
                     item.setBackground(bg)
@@ -151,7 +150,7 @@ class StatisticsPanel(QWidget):
                 t.setItem(row, col, item)
         t.setSortingEnabled(True)
 
-    def exportar_excel(self):
+    def export_excel(self):
         archivo, _ = QFileDialog.getSaveFileName(self, "Exportar Estadísticas", "estadisticas_dataset.xlsx", "Excel Files (*.xlsx)")
         if not archivo:
             return

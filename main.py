@@ -2,7 +2,7 @@ import sys
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QFont
 
-from ui.main_window import AuditoriaMainWindow
+from ui.main_window import CuratorMainWindow
 
 
 if __name__ == "__main__":
@@ -10,6 +10,6 @@ if __name__ == "__main__":
     font = QFont("Segoe UI", 10)
     app.setFont(font)
 
-    window = AuditoriaMainWindow()
+    window = CuratorMainWindow()
     window.showMaximized()
     sys.exit(app.exec())
