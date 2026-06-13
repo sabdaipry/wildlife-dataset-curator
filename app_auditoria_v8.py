@@ -1,11 +1,10 @@
 import sys
 import os
-import shutil
 import pandas as pd
 import numpy as np
-from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QHBoxLayout, QLabel, QFrame, QPushButton, QMessageBox,
-                               QGraphicsView, QGraphicsScene, QListWidget, QListWidgetItem, 
+                               QGraphicsView, QGraphicsScene, QListWidget, QListWidgetItem,
                                QCheckBox, QAbstractItemView, QSplitter, QTableWidget, QTableWidgetItem,
                                QHeaderView, QTabWidget, QFileDialog)
 from PySide6.QtGui import QPixmap, QColor, QPalette, QAction, QFont, QBrush
@@ -21,226 +20,7 @@ from matplotlib.path import Path
 from matplotlib.colors import ListedColormap
 
 from config import ARCHIVO_DATOS, CARPETA_DESCARTES, ESTILOS
-
-# =============================================================================
-# CAPA 1: MODELO Y LÓGICA DE NEGOCIO (Backend)
-# =============================================================================
-
-class DataManager(QObject):
-    """
-    Se encarga exclusivamente de la manipulación de datos y archivos.
-    No sabe nada de la interfaz gráfica.
-    """
-
-    data_changed = Signal()
-    
-    def __init__(self, csv_path, trash_path):
-        super().__init__() # Init del QObject
-        self.csv_path = csv_path
-        self.trash_path = trash_path
-        self.df = self._cargar_datos()
-        
-    def _cargar_datos(self):
-        try:
-            df = pd.read_csv(self.csv_path)
-            if 'estado' not in df.columns:
-                df['estado'] = 'activo'
-            return df
-        except FileNotFoundError:
-            print(f"Error: No se encontró {self.csv_path}")
-            return pd.DataFrame() # Retornar vacío para no romper la app
-        
-    def _guardar_csv(self):
-        """Escribe el estado actual del DataFrame al disco."""
-        try:
-            self.df.to_csv(self.csv_path, index=False)
-        except Exception as e:
-            print(f"Error guardando CSV: {e}")
-
-
-    def get_puntos_umap(self):
-        """
-        Retorna SOLO los puntos activos para graficar.
-        Importante: Retorna también los índices reales del DF para mapear clicks.
-        """
-        if self.df.empty: return [], [], [], []
-        
-        # Filtramos solo los activos
-        df_activos = self.df[self.df['estado'] == 'activo']
-        
-        if df_activos.empty: return [], [], [], []
-
-        # Colores
-        columna_color = 'familia'
-        if columna_color in df_activos.columns:
-            colores = df_activos[columna_color].astype('category').cat.codes
-        else:
-            colores = np.zeros(len(df_activos))
-            
-        # Retornamos X, Y, Colores e INDICES REALES (del DataFrame original)
-        return (df_activos['x'].values, 
-                df_activos['y'].values, 
-                colores, 
-                df_activos.index.values) # <--- Esto es clave para el mapeo
-
-    def get_info_registro(self, idx):
-        return self.df.iloc[idx]
-
-    def filtrar_por_lazo(self, vertices_lazo):
-        """Devuelve los índices de los puntos dentro del lazo."""
-        if self.df.empty: return []
-        path = Path(vertices_lazo)
-        puntos = self.df[['x', 'y']].values
-        mask = path.contains_points(puntos)
-        indices = np.where(mask)[0]
-        # Filtramos los que ya están borrados
-        indices_validos = [i for i in indices if self.df.iloc[i]['estado'] != 'borrado']
-        return indices_validos
-
-    def mover_a_descartes(self, indices):
-        """Mueve archivos respetando la jerarquía taxonómica."""
-        errores, movidos = 0, 0
-        for idx in indices:
-            registro = self.df.iloc[idx]
-            ruta_origen = str(registro['ruta_absoluta'])
-            
-            carpeta_destino, ruta_destino = self._calcular_ruta_destino(ruta_origen)
-            
-            if not os.path.exists(carpeta_destino):
-                os.makedirs(carpeta_destino, exist_ok=True)
-                
-            try:
-                # Movemos físicamente
-                if os.path.exists(ruta_origen):
-                    shutil.move(ruta_origen, ruta_destino)
-                
-                # Actualizamos flag en memoria
-                self.df.at[idx, 'estado'] = 'borrado'
-                movidos += 1
-            except Exception as e:
-                print(f"Error moviendo {ruta_origen}: {e}")
-                errores += 1
-        
-        # Guardamos cambios en disco y avisamos
-        if movidos > 0:
-            self._guardar_csv()
-            self.data_changed.emit()
-                
-        return movidos, errores
-
-    def _calcular_ruta_destino(self, ruta_origen_absoluta):
-        """Lógica pura de cálculo de rutas (la que arreglamos antes)."""
-        ruta_norm = os.path.normpath(ruta_origen_absoluta)
-        partes = ruta_norm.split(os.sep)
-        nombre_archivo = partes[-1]
-        
-        try:
-            idx_images = partes.index('images')
-            estructura_intermedia = partes[idx_images+1:-1]
-        except ValueError:
-            estructura_intermedia = []
-
-        carpeta_destino_final = os.path.join(self.trash_path, *estructura_intermedia)
-        ruta_destino_final = os.path.join(carpeta_destino_final, nombre_archivo)
-        return carpeta_destino_final, ruta_destino_final
-    
-    def get_estadisticas_detalladas(self):
-        """
-        Genera una tabla pivote con el balance de imágenes por especie.
-        Retorna: DataFrame con columnas [Activo, Borrado, Total, familia, genero]
-        """
-        if self.df.empty: return pd.DataFrame()
-
-        # 1. Agrupamos SOLO por Nombre Científico y Estado para los números
-        # Esto asegura que "Puma" y "puma" (si hubiera error) o variantes de nombre común se sumen juntos.
-        conteo = self.df.groupby(['nombre_cientifico', 'estado']).size().unstack(fill_value=0)
-        
-        # 'unstack' convierte los valores de 'estado' en columnas ('activo', 'borrado')
-        # Si no hay borrados, la columna 'borrado' podría no crearse, aseguramos que existan:
-        if 'activo' not in conteo.columns: conteo['activo'] = 0
-        if 'borrado' not in conteo.columns: conteo['borrado'] = 0
-        
-        # 2. Extraemos la Metadata Representativa
-        # Para cada nombre científico, tomamos el primer valor encontrado de los otros campos.
-        # (Así unificamos si hay ligeras diferencias en los JSONs)
-        metadata = self.df.groupby('nombre_cientifico')[['nombre_comun', 'familia', 'genero']].first()
-
-
-        # 3. Unimos todo en un solo DataFrame
-        # El índice de ambos es 'nombre_cientifico', así que Pandas los alinea automáticamente
-        df_final = pd.concat([metadata, conteo], axis=1)
-        
-        # 4. Calculamos totales
-        df_final['total_original'] = df_final['activo'] + df_final['borrado']
-        
-        return df_final.sort_values('total_original', ascending=False)
-    
-    
-    
-    def get_estadisticas_familias(self):
-        if self.df.empty: return pd.DataFrame()
-        
-        conteo = self.df.groupby(['familia', 'estado']).size().unstack(fill_value=0)
-        
-        if 'activo' not in conteo.columns: conteo['activo'] = 0
-        if 'borrado' not in conteo.columns: conteo['borrado'] = 0
-        
-        conteo['total_original'] = conteo['activo'] + conteo['borrado']
-        return conteo.sort_values('total_original', ascending=False)
-    
-    def get_resumen_global(self):
-        if self.df.empty: return {}
-        
-        total_imgs = len(self.df)
-        borradas = len(self.df[self.df['estado'] == 'borrado'])
-        activas = total_imgs - borradas
-        
-        return {
-            'n_especies': self.df['nombre_cientifico'].nunique(),
-            'n_familias': self.df['familia'].nunique(),
-            'total_imgs': total_imgs,
-            'activas': activas,
-            'borradas': borradas
-        }
-    
-    def restaurar_dataset_completo(self):
-        """
-        RESET TOTAL: Mueve todo de 'deleted' a su lugar original y resetea el CSV.
-        """
-        # Filtramos los que están marcados como borrados
-        indices_borrados = self.df[self.df['estado'] == 'borrado'].index
-        
-        restaurados = 0
-        errores = 0
-        
-        for idx in indices_borrados:
-            registro = self.df.iloc[idx]
-            ruta_original = str(registro['ruta_absoluta']) # A donde debe volver
-            
-            # Calculamos dónde está ahora (en deleted)
-            carpeta_deleted, ruta_actual_deleted = self._calcular_ruta_destino(ruta_original)
-            
-            try:
-                # Si el archivo existe en deleted, lo movemos atrás
-                if os.path.exists(ruta_actual_deleted):
-                    # Asegurar que la carpeta original exista (por si se borró vacía)
-                    os.makedirs(os.path.dirname(ruta_original), exist_ok=True)
-                    shutil.move(ruta_actual_deleted, ruta_original)
-                
-                # Reseteamos flag
-                self.df.at[idx, 'estado'] = 'activo'
-                restaurados += 1
-                
-            except Exception as e:
-                print(f"Error restaurando {ruta_original}: {e}")
-                errores += 1
-        
-        # Guardamos y notificamos
-        self._guardar_csv()
-        self.data_changed.emit()
-        
-        return restaurados, errores
-
+from core.data_manager import DataManager
 
 # =============================================================================
 # CAPA 2: COMPONENTES VISUALES (Widgets Reutilizables)
@@ -248,22 +28,22 @@ class DataManager(QObject):
 
 class UMAPWidget(QWidget):
     """Widget autónomo que maneja el gráfico Matplotlib y el Selector."""
-    
+
     # Señales personalizadas: Comunican eventos al exterior sin saber quién escucha
     seleccion_realizada = Signal(list) # Emite lista de índices
     punto_cliqueado = Signal(int)      # Emite un solo índice
     deseleccion_total = Signal() # Avisa que se hizo click en la nada
-    
+
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0,0,0,0)
-        
+
         # Toolbar y Canvas
         self.figure = Figure(figsize=(5, 5), dpi=100)
         self.canvas = FigureCanvas(self.figure)
         self.toolbar = NavigationToolbar(self.canvas, self)
-        
+
         # Botón de Lazo
         layout_boton = QHBoxLayout()
         layout_boton.setContentsMargins(10, 0, 0, 0) # Un poco de margen a la izquierda
@@ -273,17 +53,17 @@ class UMAPWidget(QWidget):
         self.btn_lazo.setCheckable(True)
         self.btn_lazo.setCursor(Qt.PointingHandCursor)
         self.btn_lazo.toggled.connect(self.toggle_lazo)
-        
+
         layout_boton.addWidget(self.btn_lazo) # Agregamos el botón
         layout_boton.addStretch()             # EL RESORTE: Empuja todo a la izquierda
 
         layout.addWidget(self.toolbar)
         layout.addLayout(layout_boton)        # Agregamos este contenedor al layout principal
-        
+
         # ------------------------
-        
+
         layout.addWidget(self.canvas)
-        
+
         self.ax = self.figure.add_subplot(111)
 
         # 1. Creamos nuestra propia línea para "congelar" el dibujo
@@ -305,7 +85,7 @@ class UMAPWidget(QWidget):
         """Crea los objetos gráficos (líneas) si no existen o tras un clear()."""
         # 1. Línea del Lazo (Roja, gruesa)
         self.linea_persistente, = self.ax.plot([], [], color='red', linewidth=2, alpha=0.9, zorder=10)
-        
+
         # 2. CROSSHAIRS (Las líneas de guía)
         # Inicialmente invisibles (visible=False)
         # zorder=5 para que estén detrás del lazo pero sobre los puntos
@@ -322,12 +102,12 @@ class UMAPWidget(QWidget):
         self.ax.clear()
 
         # Al hacer clear(), se borran los artistas, hay que recrearlos
-        self._inicializar_artistas() 
-        self.aplicar_colores_tema() # Re-aplicar colores correctos según tema actual 
+        self._inicializar_artistas()
+        self.aplicar_colores_tema() # Re-aplicar colores correctos según tema actual
 
         self.puntos_cache = np.column_stack((x, y))
         self.indices_reales = indices_reales # Guardamos el mapeo: IndiceVisual -> IndiceDF
-        
+
         # COLORES POR FAMILIA
         # Calculamos cuántas familias únicas hay
         n_familias = int(np.max(c)) + 1 if len(c) > 0 else 1
@@ -351,15 +131,15 @@ class UMAPWidget(QWidget):
         self.ax.scatter(x, y, c=c, cmap=mi_cmap, s=15, picker=5)
         self.ax.axis('off')
         self.ax.set_title("Espacio Semántico (DINOv2_vitb14 + UMAP)", color=self.color_titulo_actual)
-        
+
         self.canvas.draw()
-        
+
         self.canvas.mpl_connect('pick_event', self.on_pick)
         self.canvas.mpl_connect('button_press_event', self.on_canvas_click)
 
     def on_lasso_finished(self, verts):
         """Se ejecuta INMEDIATAMENTE al soltar el mouse."""
-        
+
         # Ocultamos crosshairs si se usa el lazo
         self.ocultar_crosshair()
 
@@ -370,11 +150,11 @@ class UMAPWidget(QWidget):
             verts_np = np.vstack([verts_np, verts_np[0]])
             self.linea_persistente.set_data(verts_np[:, 0], verts_np[:, 1])
             self.linea_persistente.set_visible(True)
-            
+
             # Forzamos el redibujado YA MISMO.
             # Esto congela la línea en la pantalla antes de que Python se ponga a pensar.
             self.canvas.draw()
-        
+
         # 2. DELEGAMOS EL CÁLCULO PESADO (Math)
         # Usamos un timer de 1ms para dejar que la GUI respire y muestre la línea,
         # y recién después hacemos el cálculo de "quién está adentro".
@@ -383,11 +163,11 @@ class UMAPWidget(QWidget):
     def _procesar_matematica_lazo(self, verts):
         """Cálculo pesado que corre después de que la línea ya se dibujó."""
         if self.puntos_cache is None: return
-        
+
         path = Path(verts)
         mask = path.contains_points(self.puntos_cache)
         indices_visuales = np.where(mask)[0]
-        
+
         # TRADUCCIÓN CRÍTICA: De índice visual a índice del DataFrame
         if self.indices_reales is not None and len(indices_visuales) > 0:
             indices_finales = self.indices_reales[indices_visuales]
@@ -409,7 +189,7 @@ class UMAPWidget(QWidget):
             verts_np = np.vstack([verts_np, verts_np[0]])
             self.linea_persistente.set_data(verts_np[:, 0], verts_np[:, 1])
             self.canvas.draw_idle() # Forzamos el redibujado visual YA
-        
+
         # 2. CÁLCULO (Puede tardar unos milisegundos, pero el usuario ya ve la línea)
         path = Path(verts)
         mask = path.contains_points(self.puntos_cache)
@@ -436,7 +216,7 @@ class UMAPWidget(QWidget):
     def on_pick(self, event):
         if self.btn_lazo.isChecked(): return
 
-        if len(event.ind) > 0: 
+        if len(event.ind) > 0:
             idx_visual = event.ind[0]
 
             # MOSTRAR CROSSHAIR EN EL PUNTO SELECCIONADO
@@ -455,7 +235,7 @@ class UMAPWidget(QWidget):
     # es capturar el evento del canvas, pero usaremos un enfoque simple:
     # Si 'on_pick' no se dispara, asumimos click en vacio? No, mejor:
     # Usamos la señal button_press_event de matplotlib arriba y verificamos "contains".
-    
+
     # CORRECCIÓN SIMPLE PARA CLICK VACÍO:
     # Vamos a confiar en que el usuario quiere deseleccionar si usa el botón derecho
     # O simplemente agregamos un botón "Limpiar".
@@ -463,7 +243,7 @@ class UMAPWidget(QWidget):
     def mouseReleaseEvent(self, event):
         # Este método es de QT, no de Matplotlib.
         super().mouseReleaseEvent(event)
-        # Si quisieras lógica compleja de clicks vacíos, iría aquí, 
+        # Si quisieras lógica compleja de clicks vacíos, iría aquí,
         # pero dejémoslo simple con el botón de lazo.
 
     def toggle_lazo(self, activo):
@@ -479,7 +259,7 @@ class UMAPWidget(QWidget):
             self.btn_lazo.setText("➰ Selección Múltiple")
             self.btn_lazo.setChecked(False)
             self.limpiar_dibujo_lazo()
-    
+
     # Método auxiliar para borrar la línea roja
     def limpiar_dibujo_lazo(self):
         # Borramos nuestra línea manual
@@ -487,7 +267,7 @@ class UMAPWidget(QWidget):
         self.linea_persistente.set_visible(False)
         self.ocultar_crosshair()
         self.canvas.draw()
-        
+
     def set_tema(self, es_oscuro):
         self.es_modo_oscuro = es_oscuro
         self.aplicar_colores_tema()
@@ -504,7 +284,7 @@ class UMAPWidget(QWidget):
             # Colores de líneas para fondo oscuro
             if self.linea_persistente: self.linea_persistente.set_color('yellow')
             # Crosshair Cyan resalta mucho en oscuro
-            if self.crosshair_v: 
+            if self.crosshair_v:
                 self.crosshair_v.set_color('#00FFFF')
                 self.crosshair_h.set_color('#00FFFF')
         else:
@@ -516,8 +296,8 @@ class UMAPWidget(QWidget):
             # Colores de líneas para fondo claro
             if self.linea_persistente: self.linea_persistente.set_color('red')
             # Crosshair Magenta o Negro resalta en blanco
-            if self.crosshair_v: 
-                self.crosshair_v.set_color('#FF00FF') 
+            if self.crosshair_v:
+                self.crosshair_v.set_color('#FF00FF')
                 self.crosshair_h.set_color('#FF00FF')
 
         self.figure.patch.set_facecolor(bg_color)
@@ -546,42 +326,42 @@ class VisorZoomWidget(QGraphicsView):
         super().__init__(parent)
         self.scene = QGraphicsScene(self)
         self.setScene(self.scene)
-        
+
         # Comportamiento de arrastre (Pan)
-        self.setDragMode(QGraphicsView.ScrollHandDrag) 
-        self.setFrameShape(QFrame.NoFrame)             
-        
+        self.setDragMode(QGraphicsView.ScrollHandDrag)
+        self.setFrameShape(QFrame.NoFrame)
+
         # Configuración de Anclas para que el zoom siga al mouse
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
-        
+
         # Ocultamos barras de scroll (el usuario navega con drag & drop)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
         # CONTROL DE ZOOM: 1.0 significa el tamaño "fit" original
-        self._current_zoom = 1.0 
+        self._current_zoom = 1.0
 
     def cargar_imagen(self, ruta):
         self.scene.clear()
 
         # Validaciones básicas
         if not os.path.exists(ruta): return False
-        
+
         pixmap = QPixmap(ruta)
         if pixmap.isNull(): return False
-        
+
         # Agregamos la imagen a la escena
         item = self.scene.addPixmap(pixmap)
-        
+
         # Ajustamos la vista para que la imagen quepa entera al principio
-        self.scene.setSceneRect(QRectF(pixmap.rect())) 
-        self.fitInView(item, Qt.KeepAspectRatio) 
+        self.scene.setSceneRect(QRectF(pixmap.rect()))
+        self.fitInView(item, Qt.KeepAspectRatio)
         return True
 
     def wheelEvent(self, event):
         """Maneja el zoom con la rueda del mouse"""
-        
+
         # preguntamos si la escena tiene ítems.
         if not self.scene.items(): return False
 
@@ -597,24 +377,24 @@ class VisorZoomWidget(QGraphicsView):
             # --- ZOOM OUT (Alejar) ---
             # Calculamos a cuánto se iría el zoom si permitimos alejar
             nuevo_zoom_teorico = self._current_zoom / zoom_factor
-            
+
             if nuevo_zoom_teorico < 1.0:
                 # BLOQUEO: Si el nuevo zoom sería menor que el original (1.0),
                 # calculamos el factor exacto para volver a 1.0 clavado y no bajar más.
-                
+
                 # Matematicamente: Queremos ir de _current_zoom a 1.0
                 # Factor = Destino / Origen = 1.0 / _current_zoom
                 if self._current_zoom > 1.0:
                     factor_correccion = 1.0 / self._current_zoom
                     self.scale(factor_correccion, factor_correccion)
                     self._current_zoom = 1.0
-                
+
                 # Si ya estamos en 1.0, no hacemos nada (ignoramos el scroll)
             else:
                 # Si estamos lejos (ej: 2.5x), permitimos alejar normalmente
                 self.scale(1 / zoom_factor, 1 / zoom_factor)
                 self._current_zoom = nuevo_zoom_teorico
-            
+
         event.accept() # Le decimos a Qt que ya manejamos el evento
 
 # =============================================================================
@@ -626,19 +406,19 @@ class AuditoriaMainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Sistema de Auditoría de Dataset")
         self.resize(1000, 700)
-        
+
         # 1. Instanciar Lógica
         self.manager = DataManager(ARCHIVO_DATOS, CARPETA_DESCARTES)
         self.ventana_stats = None # Variable para guardar la ventana hija
-        
+
         # 2. Configurar UI
         self._setup_ui()
         self._conectar_senales()
-        
+
         # 3. Cargar estado inicial
         self.es_modo_oscuro = True # Flag para tema
         self.aplicar_tema_oscuro()  # Iniciar en oscuro por defecto
-        
+
         # 4. Plotear datos iniciales
         if not self.manager.df.empty:
             x, y, c, idxs = self.manager.get_puntos_umap()
@@ -655,26 +435,26 @@ class AuditoriaMainWindow(QMainWindow):
         # --- PESTAÑA 1: AUDITORÍA (Lo que tenías antes) ---
         pestana_auditoria = QWidget()
         layout_auditoria = QHBoxLayout(pestana_auditoria) # Layout principal de esta pestaña
-        
+
         # Usamos Splitter para que el usuario pueda redimensionar paneles
         splitter = QSplitter(Qt.Horizontal)
-        
+
         # --- PANEL IZQUIERDO: Mapa ---
         self.umap_widget = UMAPWidget()
         splitter.addWidget(self.umap_widget)
-        
+
         # --- PANEL DERECHO: Lista y Visor ---
         panel_derecho = QWidget()
         layout_derecho = QVBoxLayout(panel_derecho)
-        
+
         # Botonera superior derecha
         layout_botones = QHBoxLayout()
         # Asignamos un ID (objectName) al botón para poder darle estilo CSS específico
-        self.btn_tema = QPushButton() 
-        self.btn_tema.setObjectName("btn_tema") 
+        self.btn_tema = QPushButton()
+        self.btn_tema.setObjectName("btn_tema")
         self.btn_tema.setCursor(Qt.PointingHandCursor)
         self.btn_tema.setFixedWidth(30) # Hacemos el botón cuadradito
-        
+
         # BOTÓN ESTADÍSTICAS
         """
         self.btn_stats = QPushButton("📊 Ver Estadísticas")
@@ -686,32 +466,32 @@ class AuditoriaMainWindow(QMainWindow):
         self.btn_borrar.setObjectName("btn_borrar") # ID para CSS
         self.btn_borrar.setEnabled(False)
         self.btn_borrar.setCursor(Qt.PointingHandCursor)
-        
+
         layout_botones.addWidget(self.btn_tema)
         #layout_botones.addWidget(self.btn_stats) # Lo agregamos al layout
         layout_botones.addStretch()
         layout_botones.addWidget(self.btn_borrar)
         layout_derecho.addLayout(layout_botones)
-        
+
         # Lista
         self.lbl_lista_titulo = QLabel("Archivos Seleccionados:")
         layout_derecho.addWidget(self.lbl_lista_titulo)
-        
+
         self.lista_archivos = QListWidget()
         self.lista_archivos.setSelectionMode(QAbstractItemView.SingleSelection)
         layout_derecho.addWidget(self.lista_archivos, stretch=1)
-        
+
         # Info
         self.lbl_info = QLabel("Seleccione un punto en el mapa.")
         self.lbl_info.setWordWrap(True)
         self.lbl_info.setAlignment(Qt.AlignCenter)
         self.lbl_info.setStyleSheet("font-size: 14px; padding: 10px;")
         layout_derecho.addWidget(self.lbl_info)
-        
+
         # Visor
         self.visor = VisorZoomWidget()
         layout_derecho.addWidget(self.visor, stretch=2)
-        
+
         splitter.addWidget(panel_derecho)
         splitter.setSizes([700, 400])
 
@@ -720,7 +500,7 @@ class AuditoriaMainWindow(QMainWindow):
 
         # --- PESTAÑA 2: ESTADÍSTICAS (La nueva) ---
         self.tab_stats = PestañaEstadisticas(self.manager)
-        
+
         # --- AGREGAR PESTAÑAS AL WIDGET PRINCIPAL ---
         self.tabs.addTab(pestana_auditoria, "🔍 Auditoría Visual")
         self.tabs.addTab(self.tab_stats, "📊 Estadísticas y Control")
@@ -729,7 +509,7 @@ class AuditoriaMainWindow(QMainWindow):
         # Conectamos las señales del Widget UMAP a métodos del Main
         self.umap_widget.seleccion_realizada.connect(self.procesar_seleccion_lote)
         self.umap_widget.punto_cliqueado.connect(self.procesar_seleccion_unica)
-        
+
         # Interacciones UI
         self.lista_archivos.itemClicked.connect(self.cargar_preview_desde_lista)
         self.lista_archivos.itemChanged.connect(self.actualizar_conteo_borrado)
@@ -748,7 +528,7 @@ class AuditoriaMainWindow(QMainWindow):
         # Obtenemos solo los puntos activos
         x, y, c, idxs = self.manager.get_puntos_umap()
         self.umap_widget.graficar(x, y, c, idxs)
-        
+
         # Limpiamos la selección actual para evitar errores
         self.limpiar_seleccion()
 
@@ -756,12 +536,12 @@ class AuditoriaMainWindow(QMainWindow):
     def on_canvas_click_main(self, event):
         if event.button != 1: return # Solo click izquierdo
         if self.umap_widget.btn_lazo.isChecked(): return # Si está en modo lazo, no interferir
-        
+
         # Verificamos si el click tocó algún punto usando el método 'contains' del scatter plot
-        # Accedemos a la colección de puntos del widget (esto es un poco avanzado, 
+        # Accedemos a la colección de puntos del widget (esto es un poco avanzado,
         # pero es la forma correcta de saber si le pegaste a algo o al fondo)
         contains, _ = self.umap_widget.ax.collections[0].contains(event)
-        
+
         if not contains:
             self.limpiar_seleccion()
 
@@ -776,23 +556,23 @@ class AuditoriaMainWindow(QMainWindow):
         self.umap_widget.limpiar_dibujo_lazo()
 
     # --- LÓGICA DE CONTROL ---
-    
+
     def procesar_seleccion_lote(self, indices_potenciales):
         """Recibe índices geométricos, filtra por estado y actualiza lista."""
         # Si la lista de índices viene vacía (se soltó el lazo sin agarrar nada)
         if not indices_potenciales:
             self.limpiar_seleccion()
             return
-        
+
         self.lista_archivos.blockSignals(True)
         self.lista_archivos.clear()
         count = 0
-        
+
         # Usamos el manager para validar que no estén borrados
         for idx in indices_potenciales:
             reg = self.manager.get_info_registro(idx)
             if reg['estado'] == 'borrado': continue
-            
+
             item = QListWidgetItem(f"{reg['archivo']} ({reg.get('nombre_comun','?')})")
             item.setData(Qt.UserRole, int(idx)) # Guardamos el ID real en el item
             item.setCheckState(Qt.Checked)
@@ -819,7 +599,7 @@ class AuditoriaMainWindow(QMainWindow):
         item.setCheckState(Qt.Checked)
         self.lista_archivos.addItem(item)
         self.lista_archivos.setCurrentRow(0)
-        
+
         self.cargar_preview_desde_lista(item)
         self.btn_borrar.setEnabled(True)
         self.btn_borrar.setText("🗑️ Eliminar 1 elemento")
@@ -831,7 +611,7 @@ class AuditoriaMainWindow(QMainWindow):
         # --- PARTE 1: METADATOS (Familia y Género) ---
         # Intentamos obtener columnas comunes, si no existen ponemos "?"
         # Ajusta 'family'/'familia' según cómo se llamen en tu CSV
-        familia = reg.get('family', reg.get('familia', 'Desconocida')) 
+        familia = reg.get('family', reg.get('familia', 'Desconocida'))
         genero = reg.get('genus', reg.get('genero', 'Desconocido'))
         nombre_comun = reg.get('nombre_comun', 'Sin nombre común')
         nombre_cientifico = reg.get('nombre_cientifico', 'Scientific Name')
@@ -858,7 +638,7 @@ class AuditoriaMainWindow(QMainWindow):
                  f"</p>"
                  f"{aviso_estado}") # Aquí se inserta el cartel si falta la foto
         self.lbl_info.setText(texto)
-        
+
         # --- PARTE 3: CARGAR EN VISOR ---
         # El método cargar_imagen del visor ahora se encarga de mostrar el error visualmente
         self.visor.cargar_imagen(ruta)
@@ -867,17 +647,17 @@ class AuditoriaMainWindow(QMainWindow):
         # 1. Recolectar IDs seleccionados en la GUI
         indices_a_borrar = []
         # items_visuales = []
-        
+
         for i in range(self.lista_archivos.count()):
             item = self.lista_archivos.item(i)
             if item.checkState() == Qt.Checked:
                 indices_a_borrar.append(item.data(Qt.UserRole))
                 # items_visuales.append(item)
-        
+
         if not indices_a_borrar: return
 
         # 2. Confirmación
-        resp = QMessageBox.question(self, "Confirmar", 
+        resp = QMessageBox.question(self, "Confirmar",
                                     f"¿Mover {len(indices_a_borrar)} imágenes a descartes?",
                                     QMessageBox.Yes | QMessageBox.No)
         if resp == QMessageBox.No: return
@@ -895,7 +675,7 @@ class AuditoriaMainWindow(QMainWindow):
             self.aplicar_tema_oscuro()
         else:
             self.aplicar_tema_claro()
-            
+
     def aplicar_tema_oscuro(self):
         # 1. Aplicar CSS Global (arregla QMessageBox y Textos)
         self.setStyleSheet(ESTILOS["oscuro"])
@@ -904,7 +684,7 @@ class AuditoriaMainWindow(QMainWindow):
         # 3. Configurar Visor
         self.visor.setBackgroundBrush(QColor("#1e1e1e"))
         # 4. Icono Botón (Emoji Luna)
-        self.btn_tema.setText("🌞") 
+        self.btn_tema.setText("🌞")
         self.btn_tema.setToolTip("Cambiar a modo claro")
 
         if self.ventana_stats: self.ventana_stats.set_tema(True)
@@ -924,7 +704,7 @@ class AuditoriaMainWindow(QMainWindow):
         for i in range(self.lista_archivos.count()):
             if self.lista_archivos.item(i).checkState() == Qt.Checked:
                 count += 1
-        
+
         if count > 0:
             self.btn_borrar.setEnabled(True)
             self.btn_borrar.setText(f"🗑️ Eliminar {count} Seleccionados")
@@ -937,14 +717,14 @@ class AuditoriaMainWindow(QMainWindow):
         if self.ventana_stats is None:
             # Creamos la ventana pasándole el MISMO manager
             self.ventana_stats = VentanaEstadisticas(self.manager, self)
-        
+
         # Aplicamos el tema actual antes de mostrar
         self.ventana_stats.set_tema(self.es_modo_oscuro)
         self.ventana_stats.show()
         # Traer al frente por si estaba minimizada
         self.ventana_stats.raise_()
         self.ventana_stats.activateWindow()
-    """    
+    """
 
 
 # =============================================================================
@@ -955,46 +735,46 @@ class PestañaEstadisticas(QWidget):
     def __init__(self, manager, parent=None):
         super().__init__(parent)
         self.manager = manager
-        
-        
+
+
         # Layout Principal Vertical
         layout = QVBoxLayout(self)
 
         # --- 1. CABECERA: Resumen y Botón Exportar ---
         header_layout = QHBoxLayout()
-        
+
         # Panel de Resumen (KPIs)
         self.lbl_resumen = QLabel("-")
         self.lbl_resumen.setStyleSheet("font-size: 14px; padding: 10px; background-color: rgba(0,0,0,0.1); border-radius: 5px;")
         header_layout.addWidget(self.lbl_resumen, stretch=1)
-        
+
         # Botones derechos
         layout_btns_right = QVBoxLayout()
-        
+
         self.btn_export = QPushButton("💾 Exportar Tablas")
         self.btn_export.setCursor(Qt.PointingHandCursor)
         self.btn_export.setStyleSheet("background-color: #92c43e; border-radius: 5px; color: white; font-weight: bold; padding: 8px;")
         self.btn_export.clicked.connect(self.exportar_excel)
-        
+
         # BOTÓN DE RESET
         self.btn_reset = QPushButton("🔄 Restaurar Dataset")
         self.btn_reset.setCursor(Qt.PointingHandCursor)
         self.btn_reset.setStyleSheet("background-color: #59802a; border-radius: 5px; color: white; font-weight: bold; padding: 8px;")
         # self.btn_reset.setToolTip("Mueve todas las imágenes borradas de vuelta a su lugar original")
         self.btn_reset.clicked.connect(self.resetear_dataset)
-        
+
         layout_btns_right.addWidget(self.btn_export)
         layout_btns_right.addWidget(self.btn_reset)
-        
+
         header_layout.addLayout(layout_btns_right)
         layout.addLayout(header_layout)
-        
+
         # --- 2. TABLA FAMILIAS ---
         layout.addWidget(QLabel("📊 Balance por Familias"))
         self.tabla_familias = QTableWidget()
         self.configurar_tabla(self.tabla_familias, ["Familia", "Originales", "Eliminadas", "Actuales"])
         layout.addWidget(self.tabla_familias, stretch=1)
-        
+
         # --- 3. TABLA ESPECIES ---
         layout.addWidget(QLabel("🐾 Balance por Especies"))
         self.tabla_especies = QTableWidget()
@@ -1005,7 +785,7 @@ class PestañaEstadisticas(QWidget):
 
         # Conectar señal
         self.manager.data_changed.connect(self.refrescar_todo)
-        
+
         # Carga inicial
         self.refrescar_todo()
 
@@ -1019,10 +799,10 @@ class PestañaEstadisticas(QWidget):
             "Esta acción no se puede deshacer.",
             QMessageBox.Yes | QMessageBox.Cancel
         )
-        
+
         if confirmacion == QMessageBox.Yes:
             restaurados, errores = self.manager.restaurar_dataset_completo()
-            
+
             if errores == 0:
                 QMessageBox.information(self, "Éxito", f"Se restauraron {restaurados} imágenes correctamente.\nEl dataset está como nuevo.")
             else:
@@ -1032,12 +812,12 @@ class PestañaEstadisticas(QWidget):
         tabla.setColumnCount(len(columnas))
         tabla.setHorizontalHeaderLabels(columnas)
         header = tabla.horizontalHeader()
-        
+
         # Estirar la primera columna (Nombre/Familia) y ajustar las numéricas
         header.setSectionResizeMode(0, QHeaderView.Stretch)
         for i in range(1, len(columnas)):
             header.setSectionResizeMode(i, QHeaderView.ResizeToContents)
-            
+
         tabla.setSortingEnabled(True)
         tabla.setAlternatingRowColors(True)
 
@@ -1049,7 +829,7 @@ class PestañaEstadisticas(QWidget):
     def actualizar_resumen(self):
         kpis = self.manager.get_resumen_global()
         if not kpis: return
-        
+
         txt = (f"<b>Total Imágenes:</b> {kpis['total_imgs']} "
                f"(✅ {kpis['activas']} Activas | 🗑️ {kpis['borradas']} Eliminadas) &nbsp;|&nbsp; "
                f"<b>Especies:</b> {kpis['n_especies']} &nbsp;|&nbsp; "
@@ -1061,7 +841,7 @@ class PestañaEstadisticas(QWidget):
         t = self.tabla_familias
         t.setSortingEnabled(False)
         t.setRowCount(len(df))
-        
+
         for row, (familia, registro) in enumerate(df.iterrows()):
             items = [
                 QTableWidgetItem(str(familia)),
@@ -1071,10 +851,10 @@ class PestañaEstadisticas(QWidget):
             items[1].setData(Qt.DisplayRole, int(registro['total_original']))
             items[2].setData(Qt.DisplayRole, int(registro['borrado']))
             items[3].setData(Qt.DisplayRole, int(registro['activo']))
-            
+
             for col, item in enumerate(items):
                 t.setItem(row, col, item)
-                
+
         t.setSortingEnabled(True)
 
     def actualizar_tabla_especies(self):
@@ -1082,7 +862,7 @@ class PestañaEstadisticas(QWidget):
         t = self.tabla_especies
         t.setSortingEnabled(False)
         t.setRowCount(len(df))
-        
+
         COLOR_ROJO = QColor("#ffcccc")
         COLOR_AMARILLO = QColor("#ffffcc")
 
@@ -1090,16 +870,16 @@ class PestañaEstadisticas(QWidget):
         # indice -> El nombre científico (String)
         # registro -> La Serie con columnas [nombre_comun, familia, genero, activo, borrado, total...]
         for row, (n_cientifico, registro) in enumerate(df.iterrows()):
-            
+
             # Extraemos los textos del registro, no del índice
             n_comun = str(registro['nombre_comun'])
             familia = str(registro['familia'])
             genero = str(registro['genero'])
-            
+
             activo = int(registro['activo'])
             borrado = int(registro['borrado'])
             total = int(registro['total_original'])
-            
+
             items = [
                 QTableWidgetItem(str(n_cientifico)), # Índice (Científico)
                 QTableWidgetItem(n_comun),
@@ -1107,42 +887,42 @@ class PestañaEstadisticas(QWidget):
                 QTableWidgetItem(genero),
                 QTableWidgetItem(), QTableWidgetItem(), QTableWidgetItem()
             ]
-            
+
             # Datos numéricos
             items[4].setData(Qt.DisplayRole, total)
             items[5].setData(Qt.DisplayRole, borrado)
             items[6].setData(Qt.DisplayRole, activo)
-            
+
             # Lógica de colores
             bg = None
             if activo == 0: bg = COLOR_ROJO
             elif activo < 10: bg = COLOR_AMARILLO
-            
+
             for col, item in enumerate(items):
                 if bg:
                     item.setBackground(bg)
                     item.setForeground(QColor("black"))
                 else:
                     item.setForeground(QBrush()) # Color default
-                
+
                 t.setItem(row, col, item)
-                
+
         t.setSortingEnabled(True)
 
     def exportar_excel(self):
         archivo, _ = QFileDialog.getSaveFileName(self, "Exportar Estadísticas", "estadisticas_dataset.xlsx", "Excel Files (*.xlsx)")
         if not archivo: return
-        
+
         try:
             # Obtenemos los dataframes limpios
             df_fam = self.manager.get_estadisticas_familias()
             df_esp = self.manager.get_estadisticas_detalladas()
-            
+
             # Exportamos usando Pandas (requiere openpyxl instalado)
             with pd.ExcelWriter(archivo) as writer:
                 df_fam.to_excel(writer, sheet_name='Por Familias')
                 df_esp.to_excel(writer, sheet_name='Por Especies')
-            
+
             QMessageBox.information(self, "Éxito", f"Datos exportados correctamente a:\n{archivo}")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudo exportar:\n{str(e)}\n\nAsegurate de tener instalada la librería 'openpyxl'.")
@@ -1153,7 +933,7 @@ if __name__ == "__main__":
     # Fuente un poco más grande para legibilidad
     font = QFont("Segoe UI", 10)
     app.setFont(font)
-    
+
     window = AuditoriaMainWindow()
     window.showMaximized()
     sys.exit(app.exec())
