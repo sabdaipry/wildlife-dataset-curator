@@ -1,9 +1,12 @@
+import logging
 import os
 import shutil
 import pandas as pd
 import numpy as np
 from PySide6.QtCore import QObject, Signal
 from matplotlib.path import Path
+
+logger = logging.getLogger(__name__)
 
 
 class DataManager(QObject):
@@ -22,16 +25,18 @@ class DataManager(QObject):
             df = pd.read_csv(self.csv_path)
             if 'estado' not in df.columns:
                 df['estado'] = 'activo'
+            logger.info("Loaded %d records from %s", len(df), self.csv_path)
             return df
         except FileNotFoundError:
-            print(f"Error: file not found — {self.csv_path}")
+            logger.error("CSV not found: %s", self.csv_path)
             return pd.DataFrame()
 
     def _guardar_csv(self):
         try:
             self.df.to_csv(self.csv_path, index=False)
+            logger.info("CSV saved: %s", self.csv_path)
         except Exception as e:
-            print(f"Error saving CSV: {e}")
+            logger.error("Failed to save CSV: %s", e)
 
     def get_puntos_umap(self):
         if self.df.empty: return [], [], [], []
@@ -72,11 +77,12 @@ class DataManager(QObject):
                 self.df.at[idx, 'estado'] = 'borrado'
                 movidos += 1
             except Exception as e:
-                print(f"Error moving {ruta_origen}: {e}")
+                logger.error("Failed to move %s: %s", ruta_origen, e)
                 errores += 1
         if movidos > 0:
             self._guardar_csv()
             self.data_changed.emit()
+        logger.info("Discarded %d files (%d errors)", movidos, errores)
         return movidos, errores
 
     def _calcular_ruta_destino(self, ruta_origen_absoluta):
@@ -136,8 +142,9 @@ class DataManager(QObject):
                 self.df.at[idx, 'estado'] = 'activo'
                 restaurados += 1
             except Exception as e:
-                print(f"Error restoring {ruta_original}: {e}")
+                logger.error("Failed to restore %s: %s", ruta_original, e)
                 errores += 1
         self._guardar_csv()
         self.data_changed.emit()
+        logger.info("Restored %d files (%d errors)", restaurados, errores)
         return restaurados, errores

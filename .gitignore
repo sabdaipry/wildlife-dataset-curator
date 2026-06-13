@@ -1,0 +1,12 @@
+# Logs
+app.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Entornos
+.env
+venv/
