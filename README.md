@@ -1,27 +1,27 @@
 # Wildlife Image Dataset Curator
 
-A desktop tool for visually auditing and curating wildlife image datasets using DINOv2 embeddings and UMAP projections.
+Una herramienta de escritorio para auditar y curar visualmente datasets de imágenes de vida silvestre usando embeddings de DINOv2 y proyecciones UMAP.
 
-## What it does
+## Qué hace
 
-The curator embeds every image in your dataset with a pretrained DINOv2 ViT-B/14 model, reduces the resulting high-dimensional vectors to 2D with UMAP, and renders an interactive scatter plot. You can click individual points or draw a lasso to select groups of images, preview them in the app, and send low-quality or mislabelled images to a trash folder — all tracked in a CSV so the operation is reversible.
+El curador embebe cada imagen del dataset con un modelo DINOv2 ViT-B/14 preentrenado, reduce los vectores de alta dimensionalidad a 2D con UMAP, y renderiza un gráfico de dispersión interactivo. Podés hacer clic en puntos individuales o trazar un lazo para seleccionar grupos de imágenes, previsualizarlas en la aplicación, y enviar imágenes de baja calidad o mal etiquetadas a una carpeta de descarte — todo registrado en un CSV para que la operación sea reversible.
 
-**Features**
+**Características**
 
-- Interactive UMAP scatter plot coloured by taxonomic family
-- Single-click point selection with image preview and metadata panel
-- Lasso tool for batch selection of image clusters
-- One-click discard: moves files to `data/deleted/` and marks them in the CSV
-- Full dataset restore (undo all discards)
-- Per-species and per-family statistics table
-- Dark / light theme toggle
+- Gráfico de dispersión UMAP interactivo con colores por familia taxonómica
+- Selección de puntos con un clic, panel de previsualización y metadatos
+- Herramienta lazo para selección por lotes de clusters de imágenes
+- Descarte con un clic: mueve los archivos a `data/deleted/` y los marca en el CSV
+- Restauración completa del dataset (deshacer todos los descartes)
+- Tabla de estadísticas por especie y por familia
+- Alternancia de tema oscuro / claro
 
-## Requirements
+## Requisitos
 
 - Python 3.10+
-- NVIDIA GPU with CUDA strongly recommended for embedding generation; CPU fallback is available but slow
+- GPU NVIDIA con CUDA fuertemente recomendada para la generación de embeddings; existe alternativa en CPU pero es lenta
 
-**Python dependencies**
+**Dependencias de Python**
 
 ```
 PySide6
@@ -35,31 +35,31 @@ matplotlib
 tqdm
 ```
 
-Dev dependency: `pytest`
+Dependencia de desarrollo: `pytest`
 
-## Installation
+## Instalación
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/sabdaipry/wildlife-image-dataset-curator.git
 cd wildlife-image-dataset-curator
 pip install PySide6 torch torchvision Pillow numpy pandas umap-learn matplotlib tqdm
 ```
 
-## Usage
+## Uso
 
-### Step 1 — Generate embeddings
+### Paso 1 — Generar embeddings
 
 ```bash
-python scripts/generate_embeddings.py --dataset <path/to/images>
+python scripts/generate_embeddings.py --dataset <ruta/a/imágenes>
 ```
 
-| Argument | Required | Default | Description |
+| Argumento | Requerido | Por defecto | Descripción |
 |---|---|---|---|
-| `--dataset DIR` | yes | — | Root directory of images to process |
-| `--output CSV` | no | value of `DATA_FILE` in `config.py` | Output CSV path |
-| `--batch-size N` | no | `8` | Embedding batch size |
+| `--dataset DIR` | sí | — | Directorio raíz de las imágenes a procesar |
+| `--output CSV` | no | valor de `DATA_FILE` en `config.py` | Ruta del CSV de salida |
+| `--batch-size N` | no | `8` | Tamaño del lote para embeddings |
 
-Example:
+Ejemplo:
 
 ```bash
 python scripts/generate_embeddings.py \
@@ -68,19 +68,19 @@ python scripts/generate_embeddings.py \
     --batch-size 16
 ```
 
-The script scans the directory recursively, extracts DINOv2 embeddings, runs UMAP, and writes a CSV with columns `x`, `y`, `species_id`, `scientific_name`, `common_name`, `family`, `genus`, `user`, `filename`, `absolute_path`.
+El script recorre el directorio de forma recursiva, extrae los embeddings DINOv2, ejecuta UMAP y escribe un CSV con las columnas `x`, `y`, `species_id`, `scientific_name`, `common_name`, `family`, `genus`, `user`, `filename`, `absolute_path`.
 
-### Step 2 — Run the curator app
+### Paso 2 — Ejecutar la aplicación
 
 ```bash
 python main.py
 ```
 
-The app reads the CSV path from `config.py` (`DATA_FILE`) and opens maximised.
+La aplicación lee la ruta del CSV desde `config.py` (`DATA_FILE`) y se abre maximizada.
 
-## Dataset format
+## Formato del dataset
 
-Images must live under a three-level taxonomic hierarchy:
+Las imágenes deben estar organizadas bajo una jerarquía taxonómica de tres niveles:
 
 ```
 <root>/
@@ -92,7 +92,7 @@ Images must live under a three-level taxonomic hierarchy:
             └── ...
 ```
 
-Each sidecar JSON must include at minimum:
+Cada JSON sidecar debe incluir como mínimo:
 
 ```json
 {
@@ -105,29 +105,29 @@ Each sidecar JSON must include at minimum:
 }
 ```
 
-Missing fields fall back to values inferred from the folder path. The `user` field is expected to be an object; only `user.login` is used.
+Los campos faltantes se completan con valores inferidos desde la ruta de carpetas. Se espera que el campo `user` sea un objeto; solo se usa `user.login`.
 
-## Configuration
+## Configuración
 
-Edit `config.py` to change runtime behaviour:
+Editá `config.py` para cambiar el comportamiento en tiempo de ejecución:
 
-| Key | Default | Description |
+| Clave | Por defecto | Descripción |
 |---|---|---|
-| `DATA_FILE` | `output/datos_clusters_vitb14.csv` | CSV produced by the embedding script |
-| `TRASH_FOLDER` | `data/deleted` | Destination folder for discarded images |
-| `EMBEDDING_MODEL_NAME` | `"DINOv2 ViT-B/14"` | Display name shown in the UMAP plot title |
-| `THEMES` | `{"dark": ..., "light": ...}` | Qt stylesheets; edit to customise colours |
+| `DATA_FILE` | `output/datos_clusters_vitb14.csv` | CSV generado por el script de embeddings |
+| `TRASH_FOLDER` | `data/deleted` | Carpeta de destino para las imágenes descartadas |
+| `EMBEDDING_MODEL_NAME` | `"DINOv2 ViT-B/14"` | Nombre de visualización en el título del gráfico UMAP |
+| `THEMES` | `{"dark": ..., "light": ...}` | Hojas de estilo Qt; editá para personalizar los colores |
 
-## Running tests
+## Ejecutar tests
 
 ```bash
 pytest tests/
 ```
 
-The test suite covers `DataManager`: CSV loading, global summary, lasso filtering, and destination-path calculation (10 tests).
+La suite de tests cubre `DataManager`: carga del CSV, resumen global, filtrado por lazo y cálculo de rutas de destino (10 tests).
 
 ## Roadmap
 
-- **i18n** — UI strings are currently in Spanish; extract them for proper internationalisation
-- **Additional tests** — coverage for `UMAPWidget` signals and the statistics panel
-- **Model selector in GUI** — allow switching between DINOv2 variants (ViT-S/14, ViT-L/14) without editing config
+- **i18n** — Las cadenas de la UI están actualmente en español; extraerlas para una internacionalización adecuada
+- **Tests adicionales** — Cobertura para las señales de `UMAPWidget` y el panel de estadísticas
+- **Selector de modelo en la GUI** — Permitir cambiar entre variantes de DINOv2 (ViT-S/14, ViT-L/14) sin editar la configuración
