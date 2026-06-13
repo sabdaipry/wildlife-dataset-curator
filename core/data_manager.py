@@ -18,9 +18,9 @@ class DataManager(QObject):
         super().__init__()
         self.csv_path = csv_path
         self.trash_path = trash_path
-        self.df = self._cargar_datos()
+        self.df = self._load_data()
 
-    def _cargar_datos(self):
+    def _load_data(self):
         try:
             df = pd.read_csv(self.csv_path)
             if 'status' not in df.columns:
@@ -29,6 +29,9 @@ class DataManager(QObject):
             return df
         except FileNotFoundError:
             logger.error("CSV not found: %s", self.csv_path)
+            return pd.DataFrame()
+        except (pd.errors.ParserError, pd.errors.EmptyDataError, UnicodeDecodeError) as e:
+            logger.error("Failed to parse CSV %s: %s", self.csv_path, e)
             return pd.DataFrame()
 
     def _guardar_csv(self):

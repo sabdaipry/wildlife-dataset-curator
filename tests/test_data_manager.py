@@ -61,7 +61,7 @@ def dm(qapp, csv_full, tmp_path):
     return DataManager(str(csv_full), str(tmp_path / "trash"))
 
 
-# ── _cargar_datos (via __init__) ──────────────────────────────────────────────
+# ── _load_data (via __init__) ─────────────────────────────────────────────────
 
 class TestLoadData:
 
@@ -77,6 +77,18 @@ class TestLoadData:
 
     def test_missing_file_returns_empty_dataframe(self, qapp, tmp_path):
         dm = DataManager(str(tmp_path / "no_existe.csv"), str(tmp_path / "trash"))
+        assert dm.df.empty
+
+    def test_corrupted_csv_returns_empty_dataframe(self, qapp, tmp_path):
+        csv_path = tmp_path / "corrupted.csv"
+        csv_path.write_bytes(b"@@@@\x00\nbad{{{content\nnot,valid,csv,at,all")
+        dm = DataManager(str(csv_path), str(tmp_path / "trash"))
+        assert dm.df.empty
+
+    def test_empty_file_returns_empty_dataframe(self, qapp, tmp_path):
+        csv_path = tmp_path / "empty.csv"
+        csv_path.write_text("")
+        dm = DataManager(str(csv_path), str(tmp_path / "trash"))
         assert dm.df.empty
 
 
