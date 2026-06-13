@@ -107,6 +107,8 @@ Cada JSON sidecar debe incluir como mínimo:
 
 Los campos faltantes se completan con valores inferidos desde la ruta de carpetas. Se espera que el campo `user` sea un objeto; solo se usa `user.login`.
 
+Para descargar imágenes de iNaturalist junto con su JSON de metadatos se recomienda usar [fscl-vision-data](https://github.com/AxelSkrauba/fscl-vision-data), que automatiza la descarga y genera la estructura de carpetas y los sidecars JSON compatibles con este proyecto.
+
 ## Configuración
 
 Editá `config.py` para cambiar el comportamiento en tiempo de ejecución:
