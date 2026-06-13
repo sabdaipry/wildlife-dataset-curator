@@ -23,8 +23,8 @@ class DataManager(QObject):
     def _cargar_datos(self):
         try:
             df = pd.read_csv(self.csv_path)
-            if 'estado' not in df.columns:
-                df['estado'] = 'activo'
+            if 'status' not in df.columns:
+                df['status'] = 'active'
             logger.info("Loaded %d records from %s", len(df), self.csv_path)
             return df
         except FileNotFoundError:
@@ -40,7 +40,7 @@ class DataManager(QObject):
 
     def get_puntos_umap(self):
         if self.df.empty: return [], [], [], []
-        df_activos = self.df[self.df['estado'] == 'activo']
+        df_activos = self.df[self.df['status'] == 'active']
         if df_activos.empty: return [], [], [], []
         columna_color = 'family'
         if columna_color in df_activos.columns:
@@ -61,7 +61,7 @@ class DataManager(QObject):
         puntos = self.df[['x', 'y']].values
         mask = path.contains_points(puntos)
         indices = np.where(mask)[0]
-        return [i for i in indices if self.df.iloc[i]['estado'] != 'borrado']
+        return [i for i in indices if self.df.iloc[i]['status'] != 'deleted']
 
     def mover_a_descartes(self, indices):
         errores, movidos = 0, 0
@@ -74,7 +74,7 @@ class DataManager(QObject):
             try:
                 if os.path.exists(ruta_origen):
                     shutil.move(ruta_origen, ruta_destino)
-                self.df.at[idx, 'estado'] = 'borrado'
+                self.df.at[idx, 'status'] = 'deleted'
                 movidos += 1
             except Exception as e:
                 logger.error("Failed to move %s: %s", ruta_origen, e)
@@ -100,26 +100,26 @@ class DataManager(QObject):
 
     def get_estadisticas_detalladas(self):
         if self.df.empty: return pd.DataFrame()
-        conteo = self.df.groupby(['scientific_name', 'estado']).size().unstack(fill_value=0)
-        if 'activo' not in conteo.columns: conteo['activo'] = 0
-        if 'borrado' not in conteo.columns: conteo['borrado'] = 0
+        conteo = self.df.groupby(['scientific_name', 'status']).size().unstack(fill_value=0)
+        if 'active' not in conteo.columns: conteo['active'] = 0
+        if 'deleted' not in conteo.columns: conteo['deleted'] = 0
         metadata = self.df.groupby('scientific_name')[['common_name', 'family', 'genus']].first()
         df_final = pd.concat([metadata, conteo], axis=1)
-        df_final['total_original'] = df_final['activo'] + df_final['borrado']
-        return df_final.sort_values('total_original', ascending=False)
+        df_final['total'] = df_final['active'] + df_final['deleted']
+        return df_final.sort_values('total', ascending=False)
 
     def get_estadisticas_familias(self):
         if self.df.empty: return pd.DataFrame()
-        conteo = self.df.groupby(['family', 'estado']).size().unstack(fill_value=0)
-        if 'activo' not in conteo.columns: conteo['activo'] = 0
-        if 'borrado' not in conteo.columns: conteo['borrado'] = 0
-        conteo['total_original'] = conteo['activo'] + conteo['borrado']
-        return conteo.sort_values('total_original', ascending=False)
+        conteo = self.df.groupby(['family', 'status']).size().unstack(fill_value=0)
+        if 'active' not in conteo.columns: conteo['active'] = 0
+        if 'deleted' not in conteo.columns: conteo['deleted'] = 0
+        conteo['total'] = conteo['active'] + conteo['deleted']
+        return conteo.sort_values('total', ascending=False)
 
     def get_resumen_global(self):
         if self.df.empty: return {}
         total_imgs = len(self.df)
-        borradas = len(self.df[self.df['estado'] == 'borrado'])
+        borradas = len(self.df[self.df['status'] == 'deleted'])
         return {
             'n_especies': self.df['scientific_name'].nunique(),
             'n_familias': self.df['family'].nunique(),
@@ -129,7 +129,7 @@ class DataManager(QObject):
         }
 
     def restaurar_dataset_completo(self):
-        indices_borrados = self.df[self.df['estado'] == 'borrado'].index
+        indices_borrados = self.df[self.df['status'] == 'deleted'].index
         restaurados, errores = 0, 0
         for idx in indices_borrados:
             registro = self.df.iloc[idx]
@@ -139,7 +139,7 @@ class DataManager(QObject):
                 if os.path.exists(ruta_actual_deleted):
                     os.makedirs(os.path.dirname(ruta_original), exist_ok=True)
                     shutil.move(ruta_actual_deleted, ruta_original)
-                self.df.at[idx, 'estado'] = 'activo'
+                self.df.at[idx, 'status'] = 'active'
                 restaurados += 1
             except Exception as e:
                 logger.error("Failed to restore %s: %s", ruta_original, e)

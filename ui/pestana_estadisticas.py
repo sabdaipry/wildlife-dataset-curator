@@ -105,9 +105,9 @@ class StatisticsPanel(QWidget):
                 QTableWidgetItem(str(family)),
                 QTableWidgetItem(), QTableWidgetItem(), QTableWidgetItem()
             ]
-            items[1].setData(Qt.DisplayRole, int(registro['total_original']))
-            items[2].setData(Qt.DisplayRole, int(registro['borrado']))
-            items[3].setData(Qt.DisplayRole, int(registro['activo']))
+            items[1].setData(Qt.DisplayRole, int(registro['total']))
+            items[2].setData(Qt.DisplayRole, int(registro['deleted']))
+            items[3].setData(Qt.DisplayRole, int(registro['active']))
             for col, item in enumerate(items):
                 t.setItem(row, col, item)
         t.setSortingEnabled(True)
@@ -123,9 +123,9 @@ class StatisticsPanel(QWidget):
             n_comun = str(registro['common_name'])
             family = str(registro['family'])
             genus = str(registro['genus'])
-            activo = int(registro['activo'])
-            borrado = int(registro['borrado'])
-            total = int(registro['total_original'])
+            activo = int(registro['active'])
+            borrado = int(registro['deleted'])
+            total = int(registro['total'])
             items = [
                 QTableWidgetItem(str(scientific_name)),
                 QTableWidgetItem(n_comun),

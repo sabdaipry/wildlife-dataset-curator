@@ -139,7 +139,7 @@ class CuratorMainWindow(QMainWindow):
 
         for idx in potential_indices:
             reg = self.manager.get_info_registro(idx)
-            if reg['estado'] == 'borrado':
+            if reg['status'] == 'deleted':
                 continue
             item = QListWidgetItem(f"{reg['filename']} ({reg.get('common_name','?')})")
             item.setData(Qt.UserRole, int(idx))
@@ -157,7 +157,7 @@ class CuratorMainWindow(QMainWindow):
 
     def process_single_selection(self, idx):
         reg = self.manager.get_info_registro(idx)
-        if reg['estado'] == 'borrado':
+        if reg['status'] == 'deleted':
             self.lbl_info.setText("❌ Imagen ya eliminada.")
             return
 
