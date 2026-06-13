@@ -186,11 +186,14 @@ class CuratorMainWindow(QMainWindow):
 
         if exists_on_disk:
             status_warning = ""
-        else:
+        elif reg.get('status') == 'deleted':
             self.visor.scene.clear()
             status_warning = ("<br><br><h2 style='color: #ff4444; background-color: #330000; padding: 5px;'>"
-                              "⚠️ IMAGEN NO DISPONIBLE<br><span style='font-size:12px'>"
-                              "(Archivo eliminado o movido)</span></h2>")
+                              "🗑️ Imagen eliminada del dataset</h2>")
+        else:
+            self.visor.scene.clear()
+            status_warning = ("<br><br><h2 style='color: #ff8800; background-color: #332200; padding: 5px;'>"
+                              "⚠️ Archivo no encontrado en disco</h2>")
 
         texto = (f"<h2 style='margin:0'>{common_name}</h2>"
                  f"<i style='color:#888; font-size: 14px'>{scientific_name}</i><br>"
